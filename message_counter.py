@@ -1,6 +1,12 @@
 """
 Aggregates analytics on Facebook Messenger usage. 
 
+<self>: person to designate as self
+<dir>: directory containing data (typically a file called messages, downloaded from Facebook)
+
+aggregate: charts your aggregated chat activity
+single: charts activity for an individual chat, <chat_name>
+
 Usage:
     counter.py aggregate [-c | --rolling=<window>] <self> <dir>
     counter.py single [-c|--rolling=<window>] <self> <chat_name> <dir> 
@@ -16,10 +22,16 @@ import shutil, sys, os
 from datetime import datetime, timezone
 import json
 from typing import List, Union
+from enum import Enum
 from collections import defaultdict, Counter
 
 
-import matplotlib.pyplot as plt
+class Platform(Enum):
+    IMESSAGE = 1
+    FBMESSENGER = 2
+
+import plotly.express as px
+
 import pandas as pd
 import numpy as np
 from docopt import docopt
@@ -34,6 +46,16 @@ class FacebookCounter:
 
 
     def graph(self, df, columns, cumulative = False, rolling: Union[int, bool] = False):
+        """
+        Draw a line chart for df, using the columns as individual lines
+
+        Parameters:
+        ----------
+        - `df`: Dataframe, indexed by date, with columns of names
+        - `columns`: columns to draw
+        - `cumulative`: whether to draw a cumulative graph
+        - `rolling`: whether to draw a rolling average
+        """
         # TODO refactor using functional to make this easier to work with? 
         if cumulative:
             for col in columns:
@@ -50,6 +72,9 @@ class FacebookCounter:
 
     def query_single(self, query, start = '01-01-2019', end = '01-25-2021', test: Union[int, bool] = False, cumulative = False, rolling = Union[int, bool]):
         inbox_dir = os.listdir(self.inbox_dir)
+
+
+        # text parsing
         query = ''.join([x.lower() for x in query if x!= ' '])
 
         found = False
@@ -77,7 +102,9 @@ class FacebookCounter:
         self.process_df(aggregate_df, start, end, cumulative, rolling)
             
     def process_df(self, aggregate_df, start, end, cumulative, rolling):
+        """
         
+        """
         aggregate_df['Total'] = aggregate_df.sum(axis=1)
         aggregate_df['Other'] = aggregate_df['Total'] - aggregate_df[self.self_name]
         aggregate_df.index = pd.DatetimeIndex(aggregate_df.index)
@@ -91,8 +118,46 @@ class FacebookCounter:
         
 
 class ChatLog:
+    """
+    Chatlog object represents the data for a single chat, normalizing into a pandas df
 
-    def __init__(self, search_dir: str):
+    #TODO: currently only supports messenger, integrating imessage
+
+    """
+    method_mapping = {
+        Platform.FBMESSENGER: ChatLog.load_fb_messenger,
+        Platform.IMESSAGE: ChatLog.load_imessage
+    }
+
+    def __init__(self, search_dir: str, platform_type: Platform):
+        """
+        Load data from seach_dir (either a file or directory), with platform type
+        """
+        ChatLog.method_mapping[platform_type](search_dir)
+
+    def load_imessage(self, imessage_csv_path: str):
+        """
+        Temporary method to load info from csv
+
+
+
+        Current process for retrieval:
+        1. use dbeaver (configured with Full Disk Access in Privacy)
+        2. Filter the handle table by id (phone number), get ROWID = handle_id
+        3. export message table as a csv
+        3. Filter the message table by handle_id
+        """
+        raw_df = pd.read_csv(imessage_csv_path)
+        
+
+        
+
+    def load_fb_messenger(self, search_dir: str):
+        """
+        Loads a facebook messenger chat from a directory
+
+        :param search_dir: path to an indvidiual chat directory
+        """
         file_list = os.listdir(search_dir)
         json_list = [f"{search_dir}/{file}" for file in file_list if "json" in file]
         self.messages = []
@@ -102,9 +167,7 @@ class ChatLog:
                 self.messages.extend(file_data['messages'])
                 self.participants = file_data['participants']
         self.message_counter = defaultdict(lambda: Counter())
-        self.process_chat_data()
 
-    def process_chat_data(self):
         for message in self.messages:
             message_time = datetime.fromtimestamp(message['timestamp_ms']/1000, tz=timezone.utc)
             message_time = pd.Timestamp(message_time)
